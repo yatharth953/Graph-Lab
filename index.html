@@ -772,73 +772,10 @@ function draw() {
     }
   });
 
-  // Connection lines (drawn before points so points appear on top)
-  connections.forEach(conn => {
-    if (!conn.visible) return;
-    const pts = conn.ids.map(id => savedPoints.find(p => p.id === id)).filter(Boolean);
-    if (pts.length < 2) return;
-    ctx.strokeStyle = conn.color;
-    ctx.lineWidth = 2;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    if (conn.style === 'dashed') ctx.setLineDash([10, 6]);
-    else if (conn.style === 'dotted') ctx.setLineDash([2, 6]);
-    else ctx.setLineDash([]);
-    ctx.beginPath();
-    pts.forEach((pt, i) => {
-      const [cx2, cy2] = toCanvas(pt.x, pt.y);
-      i === 0 ? ctx.moveTo(cx2, cy2) : ctx.lineTo(cx2, cy2);
-    });
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Midpoint label
-    if (conn.label) {
-      const mi = Math.floor((pts.length - 1) / 2);
-      const a2 = pts[mi], b2 = pts[mi+1] || pts[mi-1];
-      const [lmx, lmy] = toCanvas((a2.x+b2.x)/2, (a2.y+b2.y)/2);
-      ctx.font = 'bold 11px Space Mono, monospace';
-      const tw2 = ctx.measureText(conn.label).width;
-      ctx.fillStyle = 'rgba(12,15,20,0.85)';
-      ctx.fillRect(lmx - tw2/2 - 5, lmy - 18, tw2 + 10, 16);
-      ctx.fillStyle = conn.color;
-      ctx.textAlign = 'center';
-      ctx.fillText(conn.label, lmx, lmy - 5);
-    }
-
-    // Distance on each segment
-    for (let i = 0; i < pts.length - 1; i++) {
-      const a2 = pts[i], b2 = pts[i+1];
-      const dist = Math.sqrt((b2.x-a2.x)**2 + (b2.y-a2.y)**2).toFixed(2);
-      const [ax2, ay2] = toCanvas(a2.x, a2.y);
-      const [bx2, by2] = toCanvas(b2.x, b2.y);
-      const angle = Math.atan2(by2-ay2, bx2-ax2);
-      ctx.save();
-      ctx.translate((ax2+bx2)/2, (ay2+by2)/2);
-      ctx.rotate(angle);
-      ctx.font = '9px Space Mono, monospace';
-      ctx.fillStyle = conn.color + 'cc';
-      ctx.textAlign = 'center';
-      ctx.fillText(`d=${dist}`, 0, -5);
-      ctx.restore();
-    }
-  });
-
   // Saved points
   savedPoints.forEach(pt => {
     const [cx, cy] = toCanvas(pt.x, pt.y);
     if (cx < -20 || cx > W+20 || cy < -20 || cy > H+20) return;
-
-    // Selection ring
-    if (selectedPointIds.has(pt.id)) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, 12, 0, Math.PI*2);
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([4, 3]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
 
     // Crosshair
     ctx.strokeStyle = pt.color + '55';
@@ -1161,8 +1098,6 @@ function renderPoints() {
   if (savedPoints.length === 0) {
     empEl.style.display = '';
     el.querySelectorAll('.point-item').forEach(e=>e.remove());
-    selectedPointIds.clear();
-    updateSelCount();
     return;
   }
   empEl.style.display = 'none';
@@ -1170,10 +1105,9 @@ function renderPoints() {
 
   savedPoints.forEach(pt => {
     const div = document.createElement('div');
-    div.className = 'point-item' + (selectedPointIds.has(pt.id) ? ' selected' : '');
+    div.className = 'point-item';
     div.dataset.id = pt.id;
     div.innerHTML = `
-      <input type="checkbox" class="pt-checkbox" data-chk="${pt.id}" ${selectedPointIds.has(pt.id)?'checked':''} title="Select for connecting">
       <div class="color-dot" style="background:${pt.color}"></div>
       <div class="point-coords">
         <div class="lbl">${pt.label || 'Unlabelled'}</div>
@@ -1184,89 +1118,10 @@ function renderPoints() {
     el.appendChild(div);
   });
 
-  el.querySelectorAll('[data-chk]').forEach(chk => {
-    chk.addEventListener('change', () => {
-      const id = parseInt(chk.dataset.chk);
-      if (chk.checked) selectedPointIds.add(id);
-      else selectedPointIds.delete(id);
-      chk.closest('.point-item').classList.toggle('selected', chk.checked);
-      updateSelCount();
-      draw();
-    });
-  });
-
   el.querySelectorAll('[data-remove]').forEach(btn => {
     btn.addEventListener('click', () => {
-      const rid = parseInt(btn.dataset.remove);
-      savedPoints = savedPoints.filter(p => p.id != rid);
-      selectedPointIds.delete(rid);
-      connections = connections.map(c => ({...c, ids: c.ids.filter(i=>i!==rid)})).filter(c=>c.ids.length>=2);
-      renderPoints(); renderConnections(); draw();
-    });
-  });
-}
-
-function updateSelCount() {
-  const n = selectedPointIds.size;
-  document.getElementById('sel-count').textContent =
-    n === 0 ? '0 points selected' : `${n} point${n>1?'s':''} selected — ready to connect`;
-}
-
-// ---------- CONNECT POINTS ----------
-document.getElementById('connect-btn').addEventListener('click', () => {
-  if (selectedPointIds.size < 2) {
-    showToast('⚠ Select at least 2 points first');
-    return;
-  }
-  // Preserve order of selection by keeping savedPoints order
-  const orderedIds = savedPoints.filter(p => selectedPointIds.has(p.id)).map(p => p.id);
-  const color = document.getElementById('line-color').value;
-  const style = document.getElementById('line-style').value;
-  const label = document.getElementById('line-label').value.trim();
-
-  connections.push({ ids: orderedIds, color, style, label, visible: true, id: Date.now() });
-
-  selectedPointIds.clear();
-  document.getElementById('line-label').value = '';
-  renderPoints();
-  renderConnections();
-  draw();
-  showToast(`✓ Connected ${orderedIds.length} points`);
-});
-
-function renderConnections() {
-  const el = document.getElementById('connections-list');
-  el.innerHTML = '';
-  if (connections.length === 0) return;
-
-  connections.forEach(conn => {
-    const pts = conn.ids.map(id => savedPoints.find(p=>p.id===id)).filter(Boolean);
-    const names = pts.map(p => p.label || `(${fmt(p.x)},${fmt(p.y)})`).join(' → ');
-    const div = document.createElement('div');
-    div.className = 'conn-item';
-    div.innerHTML = `
-      <div class="color-dot" style="background:${conn.color}; width:12px; height:12px; flex-shrink:0; border-radius:3px;"></div>
-      <div class="conn-item-info">
-        <div class="conn-item-label">${conn.label || 'Line'}</div>
-        <div class="conn-item-sub">${names}</div>
-        <div class="conn-item-sub" style="color:${conn.color}88;">${conn.style} · ${pts.length} pts</div>
-      </div>
-      <span class="conn-vis-toggle" data-vis="${conn.id}" title="${conn.visible?'Hide':'Show'}">${conn.visible?'👁':'🚫'}</span>
-      <button class="btn btn-danger" data-delconn="${conn.id}">✕</button>
-    `;
-    el.appendChild(div);
-  });
-
-  el.querySelectorAll('[data-vis]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const c = connections.find(c=>c.id==btn.dataset.vis);
-      if (c) { c.visible = !c.visible; renderConnections(); draw(); }
-    });
-  });
-  el.querySelectorAll('[data-delconn]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      connections = connections.filter(c=>c.id!=btn.dataset.delconn);
-      renderConnections(); draw();
+      savedPoints = savedPoints.filter(p => p.id != btn.dataset.remove);
+      renderPoints(); draw();
     });
   });
 }
@@ -1364,39 +1219,6 @@ function exportPNG() {
         prevGood=true;
       }
       oc_ctx.stroke(); oc_ctx.setLineDash([]);
-    }
-  });
-
-  // Connection lines in export
-  connections.forEach(conn => {
-    if (!conn.visible) return;
-    const cpts = conn.ids.map(id => savedPoints.find(p=>p.id===id)).filter(Boolean);
-    if (cpts.length < 2) return;
-    oc_ctx.strokeStyle = conn.color; oc_ctx.lineWidth = 2;
-    oc_ctx.lineJoin='round'; oc_ctx.lineCap='round';
-    if (conn.style==='dashed') oc_ctx.setLineDash([10,6]);
-    else if (conn.style==='dotted') oc_ctx.setLineDash([2,6]);
-    else oc_ctx.setLineDash([]);
-    oc_ctx.beginPath();
-    cpts.forEach((pt,i) => { const [ecx,ecy]=toC(pt.x,pt.y); i===0?oc_ctx.moveTo(ecx,ecy):oc_ctx.lineTo(ecx,ecy); });
-    oc_ctx.stroke(); oc_ctx.setLineDash([]);
-    if (conn.label) {
-      const mi=Math.floor((cpts.length-1)/2);
-      const ea=cpts[mi], eb=cpts[mi+1]||cpts[mi-1];
-      const [elx,ely]=toC((ea.x+eb.x)/2,(ea.y+eb.y)/2);
-      oc_ctx.font='bold 11px monospace';
-      const etw=oc_ctx.measureText(conn.label).width;
-      oc_ctx.fillStyle='rgba(12,15,20,0.85)'; oc_ctx.fillRect(elx-etw/2-5,ely-18,etw+10,16);
-      oc_ctx.fillStyle=conn.color; oc_ctx.textAlign='center'; oc_ctx.fillText(conn.label,elx,ely-5);
-    }
-    for (let i=0;i<cpts.length-1;i++) {
-      const ea=cpts[i],eb=cpts[i+1];
-      const edist=Math.sqrt((eb.x-ea.x)**2+(eb.y-ea.y)**2).toFixed(2);
-      const [eax,eay]=toC(ea.x,ea.y),[ebx,eby]=toC(eb.x,eb.y);
-      const eang=Math.atan2(eby-eay,ebx-eax);
-      oc_ctx.save(); oc_ctx.translate((eax+ebx)/2,(eay+eby)/2); oc_ctx.rotate(eang);
-      oc_ctx.font='9px monospace'; oc_ctx.fillStyle=conn.color+'cc'; oc_ctx.textAlign='center';
-      oc_ctx.fillText(`d=${edist}`,0,-5); oc_ctx.restore();
     }
   });
 
